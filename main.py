@@ -1,52 +1,46 @@
 import yaml
 import json
-import time
-import random
-from pathlib import Path
-from playwright.sync_api import sync_playwright
+import asyncio
+from playwright.async_api import async_playwright
 
-# Load settings
-with open("config.yml", "r") as file:
-    config = yaml.safe_load(file)
+# Load config
+with open("config.yml", "r") as f:
+    config = yaml.safe_load(f)
 
-link = config["link"]
-target_views = config["target_views"]
+url = config["link"]
+target_views = int(config["target_views"])
 
-# Load current view count
-views_file = Path("views.json")
-if views_file.exists():
-    with open(views_file, "r") as f:
-        views_data = json.load(f)
-else:
-    views_data = {"views_sent": 0}
+# Load or initialize views.json
+try:
+    with open("views.json", "r") as f:
+        data = json.load(f)
+except FileNotFoundError:
+    data = {"views_sent": 0}
 
-views_sent = views_data["views_sent"]
+views_sent = data.get("views_sent", 0)
 
-if views_sent >= target_views:
-    print(f"Target reached: {views_sent}/{target_views} views")
-    exit()
+async def send_view():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.goto(url)
+        await page.wait_for_timeout(5000)  # Wait 5 seconds to simulate view
+        await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")  # Scroll
+        await page.wait_for_timeout(2000)  # Wait again
+        await browser.close()
 
-def send_view():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(link, timeout=60000)
-        print(f"Opened: {link}")
+# Run until target views are sent
+async def run_views():
+    global views_sent
+    while views_sent < target_views:
+        await send_view()
+        views_sent += 1
+        print(f"Views sent: {views_sent}")
+        with open("views.json", "w") as f:
+            json.dump({"views_sent": views_sent}, f)
 
-        for _ in range(random.randint(2, 4)):
-            page.mouse.wheel(0, 1000)
-            time.sleep(random.uniform(1, 2))
-
-        wait_time = random.randint(20, 40)
-        print(f"Waiting {wait_time}s to simulate view...")
-        time.sleep(wait_time)
-        browser.close()
-
-send_view()
-views_sent += 1
-views_data["views_sent"] = views_sent
-
-with open("views.json", "w") as f:
-    json.dump(views_data, f)
-
-print(f"Views sent: {views_sent}/{target_views}")
+asyncio.run(run_views())
